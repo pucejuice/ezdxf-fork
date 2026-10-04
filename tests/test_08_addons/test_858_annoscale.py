@@ -16,17 +16,27 @@ ACAD = DATA / "autocad_saved_dynamic_instances.dxf"
 BRICSCAD = DATA / "annotation_blocks_dyn.dxf"
 
 
+def _need(path: Path) -> None:
+    """The CAD-made fixture data is not part of the public repository; see
+    dynblock_data/README.md."""
+    if not path.exists():
+        pytest.skip(f"CAD fixture data not in this checkout: {path.name} "
+                    "(see tests/test_08_addons/dynblock_data/README.md)")
+
+
 def _tags(o):
     return [(t.code, t.value) for s in o.xtags.subclasses[1:] for t in s]
 
 
 @pytest.fixture(scope="module")
 def acad():
+    _need(ACAD)
     return ezdxf.readfile(ACAD)
 
 
 @pytest.fixture(scope="module")
 def bricscad():
+    _need(BRICSCAD)
     return ezdxf.readfile(BRICSCAD)
 
 
