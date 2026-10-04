@@ -15,6 +15,10 @@ from ezdxf.lldxf.types import POINTER_CODES
 FIXTURE = Path(__file__).parent / "dynblock_data" / "autocad_saved_dynamic_instances.dxf"
 PARENT = "SECTION MARKER"
 
+if not FIXTURE.exists():
+    pytest.skip(f"CAD fixture data not in this checkout: {FIXTURE.name} "
+                "(see tests/test_08_addons/dynblock_data/README.md)", allow_module_level=True)
+
 
 @pytest.fixture(scope="module")
 def baseline():
