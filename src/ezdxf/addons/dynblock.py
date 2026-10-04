@@ -301,10 +301,11 @@ def _copy_xdata(src_entry, dst_entry, doc) -> None:
 
 
 def _ensure_linetype(src, doc, name: str) -> None:
-    """A SIMPLE linetype (dashes / gaps / dots) used by a library block is copied
-    into the target if absent (the masonry block's C-block hidden lines are DASHED);
-    a target that already has the name keeps its own.  A complex linetype (text /
-    shape elements) raises."""
+    """A linetype used by a library block is copied into the target if absent
+    (the masonry block's C-block hidden lines are DASHED); a target that already
+    has the name keeps its own.  A complex linetype (text / shape elements) is
+    copied with its own pattern tags; every group-340 style handle is re-pointed
+    by name (:func:`_complex_linetype_style`)."""
     if not name or name.upper() in ("BYLAYER", "BYBLOCK", "CONTINUOUS") or name in doc.linetypes:
         return
     s = src.linetypes.get(name)
@@ -312,8 +313,13 @@ def _ensure_linetype(src, doc, name: str) -> None:
         raise DynamicBlockError(f"linetype {name!r} is used by a library block but is not in the library")
     pt = s.pattern_tags
     if pt.is_complex_type():
-        raise DynamicBlockError(f"linetype {name!r} is a complex (text / shape) linetype; copying it "
-                                "is not implemented")
+        from ezdxf.entities.ltype import LinetypePattern
+        from ezdxf.lldxf.tags import Tags
+
+        new = doc.linetypes.add(name, [0.0], description=s.dxf.get("description", ""))
+        new.pattern_tags = LinetypePattern(Tags(pt.tags))
+        new.pattern_tags.map_style_handles(lambda h: _complex_linetype_style(src, doc, name, h))
+        return
     total = next((t.value for t in pt.tags if t.code == 40), 0.0)
     elements = [t.value for t in pt.tags if t.code == 49]
     doc.linetypes.add(name, [total, *elements], description=s.dxf.get("description", ""))
@@ -323,6 +329,26 @@ def _ensure_linetype(src, doc, name: str) -> None:
 #: created ON (absolute colour) and its flags (frozen / locked) are not copied;
 #: transparency travels with the XDATA (AcCmTransparency).
 _LAYER_ATTRIBS = ("linetype", "plot", "lineweight", "true_color")
+
+
+def _complex_linetype_style(src, doc, linetype: str, handle: str) -> str:
+    """Target handle for group-340 style *handle* of complex *linetype*: a named
+    text style maps to the same-named style (copied if absent), a nameless
+    shape-file entry to the target's entry for the same .shx (created if absent).
+    An unresolvable handle raises :class:`DynamicBlockError`."""
+    style = src.entitydb.get(handle)
+    if style is None or style.dxftype() != "STYLE":
+        raise DynamicBlockError(f"complex linetype {linetype!r}: style handle {handle} resolves to "
+                                f"{style.dxftype() if style is not None else 'nothing'} in the library")
+    style_name = style.dxf.get("name", "")
+    if style_name:
+        _ensure_style(src, doc, style_name)
+        return doc.styles.get(style_name).dxf.handle
+    font = style.dxf.get("font", "")
+    if not font:
+        raise DynamicBlockError(f"complex linetype {linetype!r}: style {handle} has neither a name "
+                                "nor a shape file")
+    return doc.styles.get_shx(font).dxf.handle
 
 
 def _ensure_layer(src, doc, name: str) -> None:

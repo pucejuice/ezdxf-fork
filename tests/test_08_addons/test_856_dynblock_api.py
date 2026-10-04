@@ -94,3 +94,67 @@ def test_every_lookup_row_of_the_masonry_library_resolves():
         assert any(not e.dxf.get("invisible", 0) for e in doc.blocks.get(uname)), row["Block"]
     a = doc.audit()
     assert len(a.fixes) == 0 and len(a.errors) == 0
+
+
+# ── WP2: a block using a complex linetype can be transplanted ─────────
+
+COMPLEX = (
+    'A,.5,-.2,["AA",LT_SERIF,S=.1,U=0.0,X=-0.1,Y=-.05],-.2,'
+    '["BB",LT_ISO,S=.1,U=0.0,X=-0.1,Y=-.05],-.2,'
+    "[132,ltypeshp.shx,x=-.1,s=.1],-.1,1"
+)
+
+
+@pytest.fixture
+def complex_library(tmp_path):
+    """The annotation library with one NOTES line on a complex linetype that has
+    two text elements (two styles) and a shape element."""
+    lib = ezdxf.readfile(ANNOTATION_LIB)
+    lib.styles.add("LT_SERIF", font="romant.shx")
+    lib.styles.add("LT_ISO", font="isocp.shx")
+    lib.linetypes.add("TWO_TEXT_SHAPE", pattern=COMPLEX, length=2.5)
+    line = next(e for e in lib.blocks.get("NOTES") if e.dxftype() == "LINE")
+    line.dxf.linetype = "TWO_TEXT_SHAPE"
+    p = tmp_path / "complex_lib.dxf"
+    lib.saveas(p)
+    return p
+
+
+def _style_handles(ltype):
+    return ltype.pattern_tags.get_style_handles()
+
+
+def test_block_with_complex_linetype_is_transplanted(complex_library, tmp_path):
+    lib = ezdxf.readfile(complex_library)
+    doc = ezdxf.new("R2018")
+    assert dyn.define_dynamic_blocks(doc, ["NOTES"], library=lib) == ["NOTES"]
+    ltype = doc.linetypes.get("TWO_TEXT_SHAPE")
+    src_tags = list(lib.linetypes.get("TWO_TEXT_SHAPE").pattern_tags.tags)
+    got_tags = list(ltype.pattern_tags.tags)
+    # the library's own pattern tags, only the style handles differ
+    assert [t.code for t in got_tags] == [t.code for t in src_tags]
+    assert [t for t in got_tags if t.code != 340] == [t for t in src_tags if t.code != 340]
+    assert _style_handles(ltype) == [
+        doc.styles.get("LT_SERIF").dxf.handle,
+        doc.styles.get("LT_ISO").dxf.handle,
+        doc.styles.find_shx("ltypeshp.shx").dxf.handle,
+    ]
+    assert doc.styles.get("LT_SERIF").dxf.font == "romant.shx"
+    # an instance on it, audit clean, survives save / reload
+    ins, uname, _ = dyn.add_stretched(doc, doc.modelspace(), "NOTES", (0, 0), 12.0, library=lib)
+    a = doc.audit()
+    assert len(a.fixes) == 0 and len(a.errors) == 0, [f.message for f in a.fixes + a.errors]
+    p = tmp_path / "out.dxf"
+    doc.saveas(p)
+    r = ezdxf.readfile(p)
+    rl = r.linetypes.get("TWO_TEXT_SHAPE")
+    assert all(h in r.entitydb for h in _style_handles(rl))
+    assert [r.entitydb[h].dxf.get("name", "") for h in _style_handles(rl)] == ["LT_SERIF", "LT_ISO", ""]
+
+
+def test_existing_target_linetype_is_kept(complex_library):
+    lib = ezdxf.readfile(complex_library)
+    doc = ezdxf.new("R2018")
+    doc.linetypes.add("TWO_TEXT_SHAPE", [1.0, 0.5, -0.5], description="target's own")
+    dyn.define_dynamic_blocks(doc, ["NOTES"], library=lib)
+    assert doc.linetypes.get("TWO_TEXT_SHAPE").dxf.description == "target's own"
