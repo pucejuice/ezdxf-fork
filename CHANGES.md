@@ -12,6 +12,14 @@ the previous one:
 | `wp6-annotation-scale` | WP6 | `ezdxf.addons.annoscale` (experimental) |
 | `fork-integration` | all | the above plus this file |
 
+## CAD fixture data
+
+The CAD-made fixtures (block libraries, the AutoCAD-saved drawing, the truth JSON
+files) come from a private drawing template and are not in this repository. They
+are git-ignored in `tests/test_08_addons/dynblock_data`; its `README.md` lists the
+files with their SHA-1. Without them the dynamic-block tests skip; with them, all
+ground-truth tests run (SECTION MARKER 7 / 7, SCHEDULE 16 / 16, DETAIL LABEL 3 / 3).
+
 ## Reference function -> fork location
 
 The downstream code can become a thin wrapper: import from the fork and keep only
@@ -59,9 +67,9 @@ listed below.
    locked) are not copied, as before.
 2. **No default library.** `LIBRARY_PATH` is `None`; calls without `library=` raise
    `DynamicBlockError` naming the fix.
-3. **Representation key**: the vendor-prefixed root-dictionary key of the original libraries -> `DYNBLOCK_REPDATA` (old name in the hand-off note). Rebuild the
-   libraries with the new key, or rename the root-dictionary entry. The supplied
-   libraries in `tests/test_08_addons/dynblock_data` already use the new key.
+3. **Representation key**: the vendor-prefixed root-dictionary key of the original
+   libraries -> `DYNBLOCK_REPDATA`. Rebuild the libraries with the new key, or rename
+   the root-dictionary entry.
 4. **Complex linetypes are transplanted** (the reference raised): the library's
    pattern tags are copied unchanged, every group-340 handle is re-pointed by name
    (text style) or by .shx file (shape file); an unresolvable handle raises.
