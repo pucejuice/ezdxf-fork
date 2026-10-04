@@ -195,3 +195,33 @@ class TestImportBlockNameCase:
         assert importer.import_block("_ArchTick", rename=False) == "_ARCHTICK"
         assert importer.import_block("_archtick", rename=False) == "_ARCHTICK"
         assert len(target.blocks) == count
+
+
+class TestImporterMixedTextAndShapeLinetype:
+    """A complex linetype with a text element AND a shape element: the second
+    group-340 handle points at a nameless shape-file STYLE entry.  1.4.3 left it
+    pointing at the SOURCE document's handle - AutoCAD then loads the file but
+    cannot SAVEAS DXF (ErrorStatus 53, reported by the downstream code)."""
+
+    PATTERN = (
+        'A,.5,-.2,["T",STYLE_A,S=.1,U=0.0,X=-0.1,Y=-.05],-.2,'
+        "[132,ltypeshp.shx,x=-.1,s=.1],-.1,1"
+    )
+
+    def test_text_and_shape_handles_are_remapped(self):
+        source = ezdxf.new("R2018")
+        source.styles.add("STYLE_A", font="romans.shx")
+        source.linetypes.add("MIXED", pattern=self.PATTERN, length=2.0)
+        source.modelspace().add_line((0, 0), (1, 0), dxfattribs={"linetype": "MIXED"})
+        target = ezdxf.new("R2018")
+
+        importer = Importer(source, target)
+        importer.import_modelspace()
+        importer.finalize()
+
+        handles = style_handles(target.linetypes.get("MIXED"))
+        assert handles == [
+            handle_of_style(target, "STYLE_A"),
+            target.styles.find_shx("ltypeshp.shx").dxf.handle,
+        ]
+        assert all(h in target.entitydb for h in handles)
