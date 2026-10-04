@@ -374,7 +374,7 @@ def parse_sab(data: Union[bytes, bytearray]) -> SabBuilder:
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("expected bytes, bytearray")
     builder = SabBuilder()
-    decoder = Decoder(data)
+    decoder = Decoder(bytes(data))
     builder.header = decoder.read_header()
     entities = list(
         build_entities(decoder.read_records(), builder.header.version)

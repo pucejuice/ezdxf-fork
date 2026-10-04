@@ -21,7 +21,7 @@ __all__ = [
     "bind",
 ]
 # Stores all registered classes:
-ENTITY_CLASSES = {}
+ENTITY_CLASSES: dict[str, type] = {}
 # use @set_default_class to register the default entity class:
 DEFAULT_CLASS = None
 

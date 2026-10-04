@@ -47,4 +47,4 @@ def parse_hex_dump(txt: str) -> bytes:
         data = [int(v, 16) for v in line.strip().split(" ")]
         assert data[0] == len(b)
         b.extend(data[1:])
-    return b
+    return bytes(b)
