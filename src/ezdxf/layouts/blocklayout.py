@@ -25,6 +25,16 @@ class BlockLayout(BaseLayout):
         return entity in self.entity_space
 
     @property
+    def dynamic(self):
+        """The dynamic block definition read from the block record's
+        ``ACAD_ENHANCEDBLOCK`` evaluation graph, or ``None`` for a static block.
+        See :class:`ezdxf.addons.dynblock.DynamicBlockDefinition` (experimental).
+        """
+        from ezdxf.addons.dynblock import dynamic_definition
+
+        return dynamic_definition(self)
+
+    @property
     def block(self) -> Optional[Block]:
         """the associated :class:`~ezdxf.entities.Block` entity."""
         return self.block_record.block
