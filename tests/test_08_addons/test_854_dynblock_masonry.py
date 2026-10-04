@@ -47,6 +47,18 @@ from ezdxf.addons import dynblock as dyn
 DATA = Path(__file__).parent / "dynblock_data"
 
 
+def _require_fixture_data(*names: str) -> None:
+    """The CAD-made fixture data is not part of the public repository; see
+    dynblock_data/README.md.  Without it this module is skipped."""
+    missing = [n for n in names if not (DATA / n).exists()]
+    if missing:
+        pytest.skip(f"CAD fixture data not in this checkout: {missing} "
+                    "(see tests/test_08_addons/dynblock_data/README.md)", allow_module_level=True)
+
+
+_require_fixture_data('masonry_blocks_dyn.dxf')
+
+
 class mb:
     """Minimal stand-in for the downstream ``masonry_blocks`` wrapper: block name,
     library, and the keyword -> parameter mapping of ``add_masonry_block``.  House

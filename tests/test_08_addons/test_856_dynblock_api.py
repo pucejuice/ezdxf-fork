@@ -14,8 +14,18 @@ MASONRY_LIB = DATA / "masonry_blocks_dyn.dxf"
 MASONRY = "MASONRY BLOCK"
 
 
+def _need(*paths: Path) -> None:
+    """The CAD-made fixture data is not part of the public repository; see
+    dynblock_data/README.md."""
+    missing = [p.name for p in paths if not p.exists()]
+    if missing:
+        pytest.skip(f"CAD fixture data not in this checkout: {missing} "
+                    "(see tests/test_08_addons/dynblock_data/README.md)")
+
+
 @pytest.fixture(scope="module")
 def library():
+    _need(ANNOTATION_LIB)
     return ezdxf.readfile(ANNOTATION_LIB)
 
 
@@ -78,6 +88,7 @@ def _raw_rows(doc, name):
 def test_every_lookup_row_of_the_masonry_library_resolves():
     """The library-side twin of the reference's test_every_lookup_row_resolves
     (which reads the rows from the CAD source drawing, not supplied)."""
+    _need(MASONRY_LIB)
     lib = ezdxf.readfile(MASONRY_LIB)
     rows = _raw_rows(lib, MASONRY)
     assert len(rows) == 22
@@ -109,6 +120,7 @@ COMPLEX = (
 def complex_library(tmp_path):
     """The annotation library with one NOTES line on a complex linetype that has
     two text elements (two styles) and a shape element."""
+    _need(ANNOTATION_LIB)
     lib = ezdxf.readfile(ANNOTATION_LIB)
     lib.styles.add("LT_SERIF", font="romant.shx")
     lib.styles.add("LT_ISO", font="isocp.shx")

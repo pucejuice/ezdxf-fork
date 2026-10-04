@@ -23,6 +23,18 @@ DATA = Path(__file__).parent / "dynblock_data"
 LIB = DATA / "annotation_blocks_dyn.dxf"
 
 
+def _require_fixture_data(*names: str) -> None:
+    """The CAD-made fixture data is not part of the public repository; see
+    dynblock_data/README.md.  Without it this module is skipped."""
+    missing = [n for n in names if not (DATA / n).exists()]
+    if missing:
+        pytest.skip(f"CAD fixture data not in this checkout: {missing} "
+                    "(see tests/test_08_addons/dynblock_data/README.md)", allow_module_level=True)
+
+
+_require_fixture_data('annotation_blocks_dyn.dxf', 'detail_label_truth.json', 'section_marker_truth.json', 'detail_label_autocad_list.txt')
+
+
 @pytest.fixture(autouse=True)
 def _default_library(monkeypatch):
     """ezdxf ships no default library: the reference tests ran against the

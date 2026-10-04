@@ -1,0 +1,5 @@
+# CAD-made fixture data is private: see README.md
+*.dxf
+*.DXF
+*.json
+*.txt
