@@ -132,6 +132,8 @@ __all__ = [
     "clone_entity",
     "DynamicBlockDefinition",
     "dynamic_definition",
+    "survey",
+    "survey_summary",
 ]
 
 #: Default block library (DXF path or Drawing) used when a function is called
@@ -2094,6 +2096,171 @@ def add_stretched(doc, layout, name: str, insert, distance: float, attribs: Opti
     return ins, uname, param
 
 
+# ── survey: which blocks of a drawing can be placed ──────────────────
+
+#: Node types that only place interactive grips; not listed as parameters / actions.
+_GRIP_NODE_TYPES = frozenset({"ACAD_EVALUATION_GRAPH", "BLOCKGRIPLOCATIONCOMPONENT"})
+
+
+def _node_kind(dxftype: str) -> str:
+    if dxftype.endswith("PARAMETER"):
+        return "parameter"
+    if dxftype.endswith("ACTION"):
+        return "action"
+    if dxftype.endswith("GRIP") or dxftype in _GRIP_NODE_TYPES:
+        return "grip"
+    return "other"
+
+
+def _entity_problems(doc, block, graph: dict) -> list[str]:
+    """Reasons :func:`add_dynamic` would refuse *block*, found without writing
+    anything: entities that cannot be copied into a ``*U`` block, and entity types
+    a flip or rotate action could not transform.  (A stretch problem can depend on
+    the values placed; it is found by :func:`add_dynamic` itself.)"""
+    problems = []
+    ents = {e.dxf.handle: e for e in block}
+    for e in ents.values():
+        try:
+            _virtual_copy(e)
+        except NotImplementedError as ex:
+            problems.append(str(ex))
+    for a in graph["actions"].values():
+        if a["kind"] not in ("flip", "rotate"):
+            continue
+        allowed = _MIRRORABLE if a["kind"] == "flip" else _ROTATABLE
+        bad = sorted({ents[h].dxftype() for h in a["selection"]
+                      if h in ents and ents[h].dxftype() not in allowed})
+        if bad:
+            problems.append(f"{a['kind']} action {a['id']} ({a['name']!r}) selects {bad}, "
+                            f"which a {a['kind']} cannot transform yet")
+    return problems
+
+
+def survey(doc, names: Optional[Iterable[str]] = None, library=None) -> list[dict]:
+    """Which dynamic blocks of *doc* this module can place, and why not.
+
+    Read-only.  One record per named dynamic block (anonymous ``*`` blocks and
+    static blocks are skipped)::
+
+        {"name", "status", "reasons": [str], "parameters": {type: count},
+         "actions": {type: count}, "unsupported": [type], "seed": bool | None}
+
+    ``status`` is ``"supported"`` (the graph evaluates and every entity can be
+    copied and transformed), ``"unsupported"`` (node types outside
+    :data:`SUPPORTED_NODE_TYPES`), ``"not implemented"`` (supported node types,
+    but a feature of this block is not: a dependency cycle, an XY stretch, an
+    entity that cannot be copied or transformed ...) or ``"unreadable"`` (a
+    graph layout the parser does not know).  ``seed`` tells whether *library*
+    holds the representation constants needed to place the block (``None``
+    without a library).
+
+    Args:
+        doc: drawing to survey, e.g. a CAD template saved as DXF
+        names: block names to survey; default every named dynamic block
+        library: optional block library (path or Drawing) to check for seeds
+    """
+    from collections import Counter
+
+    lib = _library(library) if library is not None else None
+    seeds = set()
+    if lib is not None and REPDATA_KEY in lib.rootdict:
+        seeds = set(lib.rootdict[REPDATA_KEY].keys())
+    wanted = set(names) if names is not None else None
+    out = []
+    for block in doc.blocks:
+        name = block.name
+        if wanted is not None:
+            if name not in wanted:
+                continue
+        elif name.startswith("*") or block.is_any_layout:
+            continue
+        nodes = graph_nodes(doc, block.block_record)
+        if not nodes:
+            continue
+        types = [n.dxftype() for n in nodes]
+        rec: dict = {
+            "name": name,
+            "status": "supported",
+            "reasons": [],
+            "parameters": dict(Counter(t for t in types if _node_kind(t) == "parameter")),
+            "actions": dict(Counter(t for t in types if _node_kind(t) == "action")),
+            "unsupported": sorted(set(types) - SUPPORTED_NODE_TYPES),
+            "seed": (name in seeds) if lib is not None else None,
+        }
+        if rec["unsupported"]:
+            rec["status"] = "unsupported"
+            rec["reasons"] = [f"node types {rec['unsupported']}"]
+        else:
+            try:
+                graph = read_graph(doc, name)
+            except NotImplementedError as ex:
+                rec["status"], rec["reasons"] = "not implemented", [str(ex)]
+            except (DynamicBlockError, KeyError, StopIteration, TypeError, ValueError) as ex:
+                rec["status"], rec["reasons"] = "unreadable", [f"{type(ex).__name__}: {ex}"]
+            else:
+                problems = _entity_problems(doc, block, graph)
+                if problems:
+                    rec["status"], rec["reasons"] = "not implemented", problems
+        out.append(rec)
+    return out
+
+
+def survey_summary(records: list[dict]) -> dict:
+    """Totals of :func:`survey` records: blocks per status, and for every node
+    type not supported the number of blocks it blocks - the order in which
+    adding node types would make the most blocks placeable."""
+    from collections import Counter
+
+    status = Counter(r["status"] for r in records)
+    blocking = Counter(t for r in records for t in r["unsupported"])
+    only = Counter(r["unsupported"][0] for r in records if len(r["unsupported"]) == 1)
+    return {
+        "blocks": len(records),
+        "status": dict(status),
+        "unsupported_types": blocking.most_common(),
+        "sole_blocker": only.most_common(),
+        "seedless_supported": sorted(r["name"] for r in records
+                                     if r["status"] == "supported" and r["seed"] is False),
+    }
+
+
+def _main(argv=None) -> int:
+    """``python -m ezdxf.addons.dynblock DRAWING.dxf [--library LIB.dxf] [--csv OUT.csv]``"""
+    import argparse
+    import csv
+    import sys
+
+    import ezdxf
+
+    ap = argparse.ArgumentParser(prog="python -m ezdxf.addons.dynblock",
+                                 description="Survey which dynamic blocks of a DXF drawing can be placed.")
+    ap.add_argument("drawing")
+    ap.add_argument("--library", help="block library DXF to check for representation seeds")
+    ap.add_argument("--csv", help="write one row per block to this CSV file")
+    args = ap.parse_args(argv)
+    doc = ezdxf.readfile(args.drawing)
+    records = survey(doc, library=args.library)
+    width = max((len(r["name"]) for r in records), default=4)
+    for r in sorted(records, key=lambda r: (r["status"], r["name"])):
+        seed = "" if r["seed"] is None else (" seed" if r["seed"] else " NO SEED")
+        print(f"{r['name']:<{width}}  {r['status']:<15}{seed}  {'; '.join(r['reasons'])[:160]}")
+    summary = survey_summary(records)
+    print(f"\n{summary['blocks']} dynamic blocks: {summary['status']}")
+    print("unsupported node types (blocks affected):", summary["unsupported_types"])
+    print("the only missing type of a block (blocks):", summary["sole_blocker"])
+    if args.csv:
+        with open(args.csv, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["name", "status", "seed", "parameters", "actions", "unsupported", "reasons"])
+            for r in records:
+                w.writerow([r["name"], r["status"], r["seed"],
+                            " ".join(f"{k}={v}" for k, v in sorted(r["parameters"].items())),
+                            " ".join(f"{k}={v}" for k, v in sorted(r["actions"].items())),
+                            " ".join(r["unsupported"]), " | ".join(r["reasons"])])
+        print(f"wrote {args.csv}", file=sys.stderr)
+    return 0
+
+
 # ── multi-line attributes ─────────────────────────────────────────────
 
 _MTEXT_PROPS = ("char_height", "width", "style", "attachment_point", "line_spacing_factor",
@@ -2242,3 +2409,10 @@ def wrapped_line_count(doc, mtext_props: dict, text: str) -> int:
     paragraphs = plain_mtext(text, split=True)
     empty = sum(1 for p in paragraphs if _EMPTY_PARA.match(p))
     return rendered + empty
+
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(_main())

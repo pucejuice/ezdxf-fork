@@ -27,4 +27,4 @@
 version = (1, 4, 3, "release")
 # Fork of ezdxf 1.4.3 (PEP 440 local version label): bump the fork number with
 # every tagged fork release; see CHANGES.md.
-__version__ = "1.4.3+fork.1"
+__version__ = "1.4.3+fork.2"

@@ -16,7 +16,7 @@ the previous one:
 
 Installs as `ezdxf` (version `1.4.3+fork.<n>`), replacing a PyPI ezdxf:
 
-    pip install "ezdxf @ git+https://github.com/pucejuice/ezdxf-fork@ezdxf-1.4.3-fork.1"
+    pip install "ezdxf @ git+https://github.com/pucejuice/ezdxf-fork@ezdxf-1.4.3-fork.2"
 
 Release tags are named `ezdxf-1.4.3-fork.<n>` (never `v*`: upstream's PyPI deploy
 workflows run on `v*` tags). Check at runtime with `"+fork" in ezdxf.__version__`.
@@ -50,6 +50,7 @@ listed below.
 | `set_multiline_attrib`, `attrib_text`, `mtext_props_for`, `wrapped_line_count`, `clone_entity` | same |
 | `DynamicBlockError`, `SUPPORTED_NODE_TYPES`, `REPDATA_KEY` | same |
 | (new) | `BlockLayout.dynamic` -> `DynamicBlockDefinition` or `None`; `dynblock.dynamic_definition()` |
+| (new) | `dynblock.survey(doc, names=None, library=None)` / `survey_summary()`: which dynamic blocks of a drawing can be placed and why not (read-only); command line `python -m ezdxf.addons.dynblock DRAWING.dxf [--library LIB.dxf] [--csv OUT.csv]` |
 | `LIBRARY_PATH` (package-relative default) | `dynblock.LIBRARY_PATH = None`: pass `library=` or set it once |
 
 ### Importer / linetype workarounds
@@ -105,5 +106,7 @@ listed below.
 - The `.lin` compiler honours `A=` (74 bit 1) and raises on unknown parameters.
 - `Dictionary.destroy()` also deletes entries it owns (330) without the 280 flag.
 - `DXFTagStorage.destroy()` destroys objects it hard-owns by group 360.
+- mypy: the 5 errors current mypy reports in upstream code are fixed (typing only;
+  three functions now return / pass `bytes` as already declared).
 - `audit()` removes dynamic-block representation data pointing at a missing block
   record (`AuditError.INVALID_DYNAMIC_BLOCK_REPRESENTATION`).

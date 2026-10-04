@@ -170,3 +170,80 @@ def test_existing_target_linetype_is_kept(complex_library):
     doc.linetypes.add("TWO_TEXT_SHAPE", [1.0, 0.5, -0.5], description="target's own")
     dyn.define_dynamic_blocks(doc, ["NOTES"], library=lib)
     assert doc.linetypes.get("TWO_TEXT_SHAPE").dxf.description == "target's own"
+
+
+# ── survey ────────────────────────────────────────────────────────────
+
+
+def test_survey_of_a_drawing_without_dynamic_blocks():
+    doc = ezdxf.new("R2018")
+    doc.blocks.new("STATIC").add_line((0, 0), (1, 0))
+    assert dyn.survey(doc) == []
+    assert dyn.survey_summary([])["blocks"] == 0
+
+
+def test_survey_summary_ranks_missing_types():
+    records = [
+        {"name": "A", "status": "unsupported", "unsupported": ["BLOCKXYPARAMETER"], "seed": None},
+        {"name": "B", "status": "unsupported", "unsupported": ["BLOCKARRAYACTION", "BLOCKXYPARAMETER"],
+         "seed": None},
+        {"name": "C", "status": "supported", "unsupported": [], "seed": False},
+    ]
+    s = dyn.survey_summary(records)
+    assert s["status"] == {"unsupported": 2, "supported": 1}
+    assert s["unsupported_types"][0] == ("BLOCKXYPARAMETER", 2)
+    assert s["sole_blocker"] == [("BLOCKXYPARAMETER", 1)]
+    assert s["seedless_supported"] == ["C"]
+
+
+def test_survey_of_the_annotation_library(library):
+    records = {r["name"]: r for r in dyn.survey(library, library=library)}
+    assert set(records) == {"NOTES", "SCHEDULE HEADER", "SCHEDULE ROW", "SECTION MARKER",
+                            "SECTION LABEL", "DETAIL LABEL", "PLAN LABEL", "TITLE LABEL"}
+    sm = records["SECTION MARKER"]
+    assert sm["status"] == "supported" and sm["seed"] is True
+    assert sm["parameters"] == {"BLOCKROTATIONPARAMETER": 1, "BLOCKLINEARPARAMETER": 3,
+                                "BLOCKFLIPPARAMETER": 1, "BLOCKVISIBILITYPARAMETER": 1}
+    assert sm["actions"] == {"BLOCKROTATEACTION": 1, "BLOCKSTRETCHACTION": 3, "BLOCKFLIPACTION": 1}
+    # the same refusal add_dynamic gives (test_uncopyable_entity_raises_before_writing)
+    assert records["SECTION LABEL"]["status"] == "not implemented"
+    assert "CONTEXTDATA" in records["SECTION LABEL"]["reasons"][0]
+    n = len(library.entitydb)
+    dyn.survey(library)
+    assert len(library.entitydb) == n       # read-only
+
+
+def test_survey_reports_unsupported_types(library, monkeypatch):
+    real = dyn.graph_nodes
+
+    class _Fake:
+        def dxftype(self):
+            return "BLOCKXYPARAMETER"
+
+    monkeypatch.setattr(dyn, "graph_nodes", lambda d, br: real(d, br) + [_Fake()] if real(d, br) else [])
+    records = dyn.survey(library, ["NOTES"])
+    assert records[0]["status"] == "unsupported"
+    assert records[0]["unsupported"] == ["BLOCKXYPARAMETER"]
+    assert records[0]["parameters"]["BLOCKXYPARAMETER"] == 1
+
+
+def test_survey_flags_a_flip_of_text(library):
+    """A flip selection holding TEXT is refused by add_dynamic; the survey says so."""
+    doc = ezdxf.new("R2018")
+    dyn.define_dynamic_blocks(doc, ["SECTION MARKER"], library=library)
+    g = dyn.read_graph(doc, "SECTION MARKER")
+    flip = next(a for a in g["actions"].values() if a["kind"] == "flip")
+    block = doc.blocks.get("SECTION MARKER")
+    text = block.add_text("X")
+    problems = dyn._entity_problems(doc, block, {**g, "actions": {
+        flip["id"]: {**flip, "selection": flip["selection"] + [text.dxf.handle]}}})
+    assert any("TEXT" in p and "flip" in p for p in problems)
+
+
+def test_survey_command_line(library, tmp_path, capsys):
+    out = tmp_path / "survey.csv"
+    assert dyn._main([str(ANNOTATION_LIB), "--library", str(ANNOTATION_LIB), "--csv", str(out)]) == 0
+    text = capsys.readouterr().out
+    assert "8 dynamic blocks" in text and "SECTION MARKER" in text
+    rows = out.read_text(encoding="utf-8").splitlines()
+    assert rows[0].startswith("name,status,seed") and len(rows) == 9
