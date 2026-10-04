@@ -7,6 +7,7 @@ from typing import (
     Iterable,
     Sequence,
     Optional,
+    Callable,
 )
 from typing_extensions import Self
 from copy import deepcopy
@@ -76,7 +77,23 @@ class LinetypePattern:
         return self.tags.get_first_value(340, "0")
 
     def set_style_handle(self, handle):
+        """Set the first text style or shape file handle, see also
+        :meth:`map_style_handles` for linetypes with more than one embedded
+        text or shape element.
+        """
         return self.tags.update(DXFTag(340, handle))
+
+    def get_style_handles(self) -> list[str]:
+        """Returns the text style or shape file handles of all embedded
+        elements (one group code 340 per element) in pattern order.
+        """
+        return [tag.value for tag in self.tags if tag.code == 340]
+
+    def map_style_handles(self, func: Callable[[str], str]) -> None:
+        """Replace each group code 340 handle by the result of `func(handle)`."""
+        for index, tag in enumerate(self.tags):
+            if tag.code == 340:
+                self.tags[index] = DXFTag(340, func(tag.value))
 
     def compile(self) -> Sequence[float]:
         """Returns the simplified dash-gap-dash... line pattern,
@@ -255,16 +272,16 @@ class Linetype(DXFEntity):
         assert self.doc is not None, "LTYPE entity must be assigned to a document"
         super().register_resources(registry)
         # register text styles and shape files for complex linetypes
-        style_handle = self.pattern_tags.get_style_handle()
-        style = self.doc.styles.get_entry_by_handle(style_handle)
-        if style is not None:
-            registry.add_entity(style)
+        for style_handle in self.pattern_tags.get_style_handles():
+            style = self.doc.styles.get_entry_by_handle(style_handle)
+            if style is not None:
+                registry.add_entity(style)
 
     def map_resources(self, clone: Self, mapping: xref.ResourceMapper) -> None:
         """Translate registered resources from self to the copied entity."""
         assert isinstance(clone, Linetype)
         super().map_resources(clone, mapping)
-        style_handle = self.pattern_tags.get_style_handle()
-        if style_handle != "0":
-            # map text style or shape file handle of complex linetype
-            clone.pattern_tags.set_style_handle(mapping.get_handle(style_handle))
+        # map text style or shape file handles of complex linetype
+        clone.pattern_tags.map_style_handles(
+            lambda handle: handle if handle == "0" else mapping.get_handle(handle)
+        )

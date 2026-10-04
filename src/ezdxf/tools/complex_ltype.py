@@ -83,6 +83,7 @@ class ComplexLineTypePart:
         self.type = type_
         self.value = value
         self.font = font
+        self.flags = 0  # additional group code 74 flags
         self.tags = Tags()
 
     def complex_ltype_tags(self, doc: "Drawing") -> Sequence[DXFTag]:
@@ -106,10 +107,10 @@ class ComplexLineTypePart:
             handle = "0"
         tags = []
         if self.type == "TEXT":
-            tags.append(DXFTag(74, 2))
+            tags.append(DXFTag(74, 2 | self.flags))
             tags.append(DXFTag(75, 0))
         else:  # SHAPE
-            tags.append(DXFTag(74, 4))
+            tags.append(DXFTag(74, 4 | self.flags))
             tags.append(DXFTag(75, self.value))
         tags.append(DXFTag(340, handle))
         tags.extend(self.tags)
@@ -120,11 +121,13 @@ class ComplexLineTypePart:
 
 CMD_CODES = {
     "s": 46,  # scaling factor
-    "r": 50,  # rotation angle, r == u
-    "u": 50,  # rotation angle
+    "r": 50,  # relative rotation angle
+    "a": 50,  # absolute rotation angle, sets bit 1 of group code 74
+    "u": 50,  # upright rotation angle, the upright flag is not supported
     "x": 44,  # shift x units = parallel to line direction
     "y": 45,  # shift y units = normal to line direction
 }
+ABSOLUTE_ROTATION = 1  # group code 74 bit, see DXF reference LTYPE
 
 
 def compile_complex_definition(tokens: Sequence) -> ComplexLineTypePart:
@@ -134,7 +137,14 @@ def compile_complex_definition(tokens: Sequence) -> ComplexLineTypePart:
     while len(commands):
         cmd = commands.pop()
         value = commands.pop()
-        code = CMD_CODES.get(cmd, 0)
+        try:
+            code = CMD_CODES[cmd]
+        except KeyError:
+            raise DXFValueError(
+                f"Complex line type error, unknown parameter '{cmd}='."
+            )
+        if cmd == "a":
+            part.flags |= ABSOLUTE_ROTATION
         params[code] = DXFTag(code, value)
 
     for code in (46, 50, 44, 45):

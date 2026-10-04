@@ -87,12 +87,15 @@ class Importer:
         self.used_dimstyles: set[str] = set()
         self.used_arrows: set[str] = set()
         self.handle_mapping: dict[str, str] = dict()  # old_handle: new_handle
+        # handles of the LTYPE entries created by this importer in the target
+        self.imported_linetypes: set[str] = set()
 
         # collects all imported INSERT entities, for later name resolving.
         self.imported_inserts: list[DXFEntity] = list()  # imported inserts
 
         # collects all imported block names and their assigned new name
-        # imported_block[original_name] = new_name
+        # imported_block[original_name] = new_name, use _block_key() as key,
+        # block names are case-insensitive
         self.imported_blocks: dict[str, str] = dict()
         self._default_plotstyle_handle = target.plotstyles["Normal"].dxf.handle
         self._default_material_handle = target.materials["Global"].dxf.handle
@@ -119,15 +122,16 @@ class Importer:
     def _add_linetype_resources(self, linetype: Linetype) -> None:
         if not linetype.pattern_tags.is_complex_type():
             return
-        style_handle = linetype.pattern_tags.get_style_handle()
-        style = self.source.entitydb.get(style_handle)
-        if style is None:
-            return
-        if style.dxf.name == "":
-            # Shape file entries have no name!
-            self.used_shape_files.add(style.dxf.font)
-        else:
-            self.used_styles.add(style.dxf.name)
+        # one text style or shape file per embedded element
+        for style_handle in linetype.pattern_tags.get_style_handles():
+            style = self.source.entitydb.get(style_handle)
+            if style is None:
+                continue
+            if style.dxf.name == "":
+                # Shape file entries have no name!
+                self.used_shape_files.add(style.dxf.font)
+            else:
+                self.used_styles.add(style.dxf.name)
 
     def import_tables(
         self, table_names: Union[str, Iterable[str]] = "*", replace=False
@@ -202,6 +206,11 @@ class Importer:
                         f'Discarding already existing entry "{entry_name}" '
                         f"of {name} table."
                     )
+                    # References to the source entry resolve to the existing
+                    # target entry:
+                    self.handle_mapping[table_entry.dxf.handle] = target_table.get(
+                        entry_name
+                    ).dxf.handle
                     continue
 
             if name == "layers":
@@ -219,6 +228,8 @@ class Importer:
 
             # Register resource handles for mapping:
             self.handle_mapping[table_entry.dxf.handle] = new_table_entry.dxf.handle
+            if name == "linetypes":
+                self.imported_linetypes.add(new_table_entry.dxf.handle)
 
     def import_shape_files(self, fonts: set[str]) -> None:
         """Import shape file table entries from the source document into the
@@ -515,8 +526,9 @@ class Importer:
                 num += 1
             return name
 
+        key = _block_key(block_name)
         try:  # already imported block?
-            return self.imported_blocks[block_name]
+            return self.imported_blocks[key]
         except KeyError:
             pass
 
@@ -527,8 +539,10 @@ class Importer:
 
         target_blocks = self.target.blocks
         if (block_name in target_blocks) and (rename is False):
-            self.imported_blocks[block_name] = block_name
-            return block_name
+            # target block names are case-insensitive, return the existing name
+            existing_name = target_blocks.get(block_name).name
+            self.imported_blocks[key] = existing_name
+            return existing_name
 
         new_block_name = get_new_block_name()
         block = source_block.block
@@ -543,7 +557,7 @@ class Importer:
             },
         )
         self.import_entities(source_block, target_layout=target_block)
-        self.imported_blocks[block_name] = new_block_name
+        self.imported_blocks[key] = new_block_name
         return new_block_name
 
     def _create_missing_arrows(self):
@@ -615,12 +629,30 @@ class Importer:
             self._add_linetype_resources(ltype)
 
     def update_complex_linetypes(self):
+        """Map the text style and shape file handles of all complex linetypes
+        imported by this importer to the target document. Linetypes which
+        already existed in the target document are not touched. An unresolvable
+        style handle is mapped to the "Standard" text style.
+        """
         std_handle = self.target.styles.get("STANDARD").dxf.handle
+
+        def map_handle(old_handle: str) -> str:
+            try:
+                return self.handle_mapping[old_handle]
+            except KeyError:
+                logger.warning(
+                    f"Text style or shape file #{old_handle} of a complex "
+                    f'linetype not imported, using "Standard" instead.'
+                )
+                return std_handle
+
         for linetype in self.target.linetypes:
+            if linetype.dxf.handle not in self.imported_linetypes:
+                continue
             if linetype.pattern_tags.is_complex_type():
-                old_handle = linetype.pattern_tags.get_style_handle()
-                new_handle = self.handle_mapping.get(old_handle, std_handle)
-                linetype.pattern_tags.set_style_handle(new_handle)
+                linetype.pattern_tags.map_style_handles(map_handle)
+        # do not map the same linetype twice, if finalize() is called again
+        self.imported_linetypes.clear()
 
     def finalize(self) -> None:
         """Finalize the import by importing required table entries and BLOCK
@@ -633,6 +665,10 @@ class Importer:
         self._add_required_complex_linetype_resources()
         self._import_required_table_entries()
         self._create_missing_arrows()
+
+
+def _block_key(name: str) -> str:
+    return name.upper()
 
 
 def new_clean_entity(entity: DXFEntity, keep_xdata: bool = False) -> DXFEntity:

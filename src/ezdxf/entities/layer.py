@@ -267,6 +267,15 @@ class Layer(DXFEntity):
         self.set_color(value)
 
     @property
+    def linetype(self) -> str:
+        """Get/set the layer linetype name, same as :attr:`dxf.linetype`."""
+        return self.dxf.linetype
+
+    @linetype.setter
+    def linetype(self, name: str) -> None:
+        self.dxf.linetype = name
+
+    @property
     def description(self) -> str:
         try:
             xdata = self.get_xdata(AcAecLayerStandard)
