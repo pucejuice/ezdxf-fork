@@ -541,7 +541,30 @@ class Dictionary(DXFObject):
 
         if self.is_hard_owner:
             self._delete_hard_owned_entries()
+        else:
+            self._delete_owned_entries()
         super().destroy()
+
+    def _delete_owned_entries(self) -> None:
+        # Entries of a dictionary without the hard-owner flag (group code 280)
+        # whose owner (group code 330) is this dictionary, e.g. AutoCAD's
+        # BDM_DATABASE / PERSIDMANAGER and ACDB_ANNOTATIONSCALES entries
+        # (soft-owner group code 350).  Left alive they would become orphans
+        # with an invalid owner handle, which audit() deletes anyway.
+        doc = self.doc
+        if doc is None:
+            return
+        handle = self.dxf.handle
+        for _, entity in self.items():
+            if (
+                isinstance(entity, DXFEntity)
+                and entity.is_alive
+                and entity.dxf.owner == handle
+            ):
+                if entity in doc.objects:
+                    doc.objects.delete_entity(entity)  # type: ignore
+                else:
+                    doc.entitydb.delete_entity(entity)
 
 
 acdb_dict_with_default = DefSubclass(

@@ -65,6 +65,7 @@ class AuditError(IntEnum):
     INVALID_FLOATING_POINT_VALUE = 117
     MISSING_PERSISTENT_REACTOR = 118
     BLOCK_NAME_MISMATCH = 119
+    INVALID_DYNAMIC_BLOCK_REPRESENTATION = 120
 
     # DXF entity property errors:
     INVALID_ENTITY_HANDLE = 201
@@ -246,6 +247,7 @@ class Auditor:
         self.check_tables()
         self.doc.objects.audit(self)
         self.doc.blocks.audit(self)
+        self.check_dynamic_block_representations()
         self.doc.groups.audit(self)
         self.doc.layouts.audit(self)
         self.audit_all_database_entities()
@@ -253,6 +255,52 @@ class Auditor:
         self.empty_trashcan()
         self.doc.objects.purge()
         return self.errors
+
+    def check_dynamic_block_representations(self) -> None:
+        """Remove dynamic-block representation data that points at a block record
+        which does not exist: the ``AcDbBlockRepBTag`` XDATA of an anonymous
+        representation block and the ``AcDbBlockRepresentation`` data of an INSERT.
+        The geometry is kept as a plain anonymous block reference.
+        """
+        from ezdxf.sections.blocks import (
+            REP_BTAG,
+            representation_parent_handle,
+            representation_data_parent_handle,
+            remove_representation_data,
+        )
+
+        db = self.entitydb
+
+        def is_block_record(handle: Optional[str]) -> bool:
+            entity = db.get(handle) if handle else None
+            return (
+                entity is not None
+                and entity.is_alive
+                and entity.dxftype() == "BLOCK_RECORD"
+            )
+
+        for br in list(self.doc.block_records):
+            handle = representation_parent_handle(br)  # type: ignore
+            if handle is not None and not is_block_record(handle):
+                br.discard_xdata(REP_BTAG)
+                self.fixed_error(
+                    code=AuditError.INVALID_DYNAMIC_BLOCK_REPRESENTATION,
+                    message=f"Removed {REP_BTAG} XDATA pointing at missing block "
+                    f"record #{handle} from {str(br)}",
+                    dxf_entity=br,
+                )
+        for entity in list(db.values()):
+            if not entity.is_alive or entity.dxftype() != "INSERT":
+                continue
+            handle = representation_data_parent_handle(entity)
+            if handle is not None and not is_block_record(handle):
+                remove_representation_data(entity)
+                self.fixed_error(
+                    code=AuditError.INVALID_DYNAMIC_BLOCK_REPRESENTATION,
+                    message=f"Removed dynamic block representation data pointing "
+                    f"at missing block record #{handle} from {str(entity)}",
+                    dxf_entity=entity,
+                )
 
     def empty_trashcan(self):
         if self.has_trashcan:

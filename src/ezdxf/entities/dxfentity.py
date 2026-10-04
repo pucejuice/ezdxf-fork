@@ -1071,8 +1071,36 @@ class DXFTagStorage(DXFEntity):
         if not self.is_alive:
             return
 
+        self._destroy_hard_owned_objects()
         del self.xtags
         super().destroy()
+
+    def _destroy_hard_owned_objects(self) -> None:
+        # An unsupported object can hard-own other objects by group code 360,
+        # e.g. the ACAD_EVALUATION_GRAPH of a dynamic block owns its parameter,
+        # grip and action nodes.  Destroy each object referenced by group code
+        # 360 whose owner (group code 330) is this object, as a DICTIONARY
+        # does for its hard owned entries; otherwise they become orphans with
+        # an invalid owner handle.
+        doc = self.doc
+        if doc is None:
+            return
+        handle = self.dxf.handle
+        children = [
+            tag.value
+            for subclass in self.xtags.subclasses[1:]
+            for tag in subclass
+            if tag.code == 360
+        ]
+        db = doc.entitydb
+        for child_handle in children:
+            child = db.get(child_handle)
+            if child is None or not child.is_alive or child.dxf.owner != handle:
+                continue
+            if child in doc.objects:
+                doc.objects.delete_entity(child)  # type: ignore
+            else:
+                db.delete_entity(child)
 
     def __virtual_entities__(self) -> Iterator[DXFGraphic]:
         """Implements the SupportsVirtualEntities protocol."""

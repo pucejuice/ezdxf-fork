@@ -25,6 +25,7 @@ from ezdxf.entities import (
     Attrib,
     Block,
     BlockRecord,
+    Dictionary,
     EndBlk,
     entity_linker,
     factory,
@@ -280,6 +281,9 @@ class BlocksSection:
         its content, raises :class:`DXFKeyError` if `name` not exist.
         """
         if name in self:
+            block_record = self.block_records.get(name)
+            if block_record is not None:
+                detach_dynamic_block_representations(block_record)
             self.block_records.remove(name)
         else:
             raise DXFKeyError(f'Block "{name}" does not exist.')
@@ -424,6 +428,12 @@ class BlocksSection:
 
             if len(block_refs):
                 raise DXFBlockInUseError(f'Block "{name}" is still in use.')
+            reps = dynamic_block_representations(block.block_record)
+            if reps:
+                raise DXFBlockInUseError(
+                    f'Dynamic block "{name}" is still in use by {len(reps)} '
+                    f"representation block(s) ({reps[0].dxf.name}, ...)."
+                )
         self.__delitem__(name)
 
     def delete_all_blocks(self) -> None:
@@ -516,3 +526,94 @@ class BlocksSection:
                         es.remove(entity)
                     except ValueError:
                         pass
+
+
+# Dynamic blocks: an instance of a dynamic block is an INSERT of an anonymous
+# "*U" block whose BLOCK_RECORD carries the XDATA "AcDbBlockRepBTag" with the
+# handle (1005) of the dynamic block's BLOCK_RECORD, and whose INSERT extension
+# dictionary holds "AcDbBlockRepresentation" with an ACDB_BLOCKREPRESENTATION_DATA
+# object pointing (340) at the same BLOCK_RECORD.
+REP_BTAG = "AcDbBlockRepBTag"
+REP_DICT = "AcDbBlockRepresentation"
+REP_DATA = "AcDbRepData"
+
+
+def representation_parent_handle(block_record: BlockRecord) -> Optional[str]:
+    """Handle of the dynamic block record `block_record` represents, or ``None``."""
+    if not block_record.has_xdata(REP_BTAG):
+        return None
+    for tag in block_record.get_xdata(REP_BTAG):
+        if tag.code == 1005:
+            return tag.value
+    return None
+
+
+def dynamic_block_representations(block_record: BlockRecord) -> list[BlockRecord]:
+    """Block records of the anonymous representation blocks of the dynamic
+    block `block_record` (empty for a static block)."""
+    doc = block_record.doc
+    if doc is None:
+        return []
+    handle = block_record.dxf.handle
+    return [
+        br
+        for br in doc.block_records
+        if br is not block_record and representation_parent_handle(br) == handle  # type: ignore
+    ]
+
+
+def representation_data_parent_handle(insert: DXFEntity) -> Optional[str]:
+    """Handle stored in the INSERT's ``AcDbBlockRepresentation/AcDbRepData``
+    object (group code 340), or ``None``."""
+    if not insert.has_extension_dict:
+        return None
+    xdict = insert.get_extension_dict()
+    rep = xdict.dictionary.get(REP_DICT)
+    if not isinstance(rep, Dictionary):
+        return None
+    data = rep.get(REP_DATA)
+    if data is None or not hasattr(data, "xtags"):
+        return None
+    for subclass in data.xtags.subclasses:
+        for tag in subclass:
+            if tag.code == 340:
+                return tag.value
+    return None
+
+
+def remove_representation_data(insert: DXFEntity) -> None:
+    """Remove the ``AcDbBlockRepresentation`` entry of the INSERT's extension
+    dictionary and destroy its objects."""
+    if not insert.has_extension_dict:
+        return
+    dictionary = insert.get_extension_dict().dictionary
+    entry = dictionary.get(REP_DICT)
+    dictionary.discard(REP_DICT)
+    if entry is not None and entry.is_alive:
+        doc = insert.doc
+        if doc is not None and entry in doc.objects:
+            doc.objects.delete_entity(entry)  # type: ignore
+        else:
+            entry.destroy()
+
+
+def detach_dynamic_block_representations(block_record: BlockRecord) -> None:
+    """Turn every representation of the dynamic block `block_record` into a plain
+    anonymous block before `block_record` is deleted: the ``AcDbBlockRepBTag``
+    XDATA of the representation block records and the ``AcDbBlockRepresentation``
+    data of the INSERTs that point at `block_record` are removed.  The geometry is
+    kept.  Without this, both keep pointing at the deleted block record."""
+    doc = block_record.doc
+    if doc is None:
+        return
+    handle = block_record.dxf.handle
+    reps = dynamic_block_representations(block_record)
+    for br in reps:
+        br.discard_xdata(REP_BTAG)
+    for entity in list(doc.entitydb.values()):
+        if (
+            entity.is_alive
+            and entity.dxftype() == "INSERT"
+            and representation_data_parent_handle(entity) == handle
+        ):
+            remove_representation_data(entity)
