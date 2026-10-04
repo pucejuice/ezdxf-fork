@@ -12,6 +12,16 @@ the previous one:
 | `wp6-annotation-scale` | WP6 | `ezdxf.addons.annoscale` (experimental) |
 | `fork-integration` | all | the above plus this file |
 
+## Install
+
+Installs as `ezdxf` (version `1.4.3+fork.<n>`), replacing a PyPI ezdxf:
+
+    pip install "ezdxf @ git+https://github.com/pucejuice/ezdxf-fork@ezdxf-1.4.3-fork.1"
+
+Release tags are named `ezdxf-1.4.3-fork.<n>` (never `v*`: upstream's PyPI deploy
+workflows run on `v*` tags). Check at runtime with `"+fork" in ezdxf.__version__`.
+The C extensions are optional: without a C compiler ezdxf installs as pure Python.
+
 ## CAD fixture data
 
 The CAD-made fixtures (block libraries, the AutoCAD-saved drawing, the truth JSON

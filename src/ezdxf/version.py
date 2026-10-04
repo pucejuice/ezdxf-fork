@@ -25,4 +25,6 @@
 #   2. bug fix release: VERSION = "0.9.2"; version = (0, 9, 2, 'release')
 
 version = (1, 4, 3, "release")
-__version__ = "1.4.3"
+# Fork of ezdxf 1.4.3 (PEP 440 local version label): bump the fork number with
+# every tagged fork release; see CHANGES.md.
+__version__ = "1.4.3+fork.1"
